@@ -9,7 +9,7 @@ export const oauthCallback = async (req, res, next) => {
     const { provider, oauthId, email, name, profileImage, role } = req.body;
 
     // Validate provider
-    if (!['google', 'github'].includes(provider)) {
+    if (provider !== 'google') {
       return res.status(400).json({
         success: false,
         message: 'Invalid OAuth provider',
