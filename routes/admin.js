@@ -15,8 +15,8 @@ router.use(protect);
 router.use(authorize('admin'));
 
 router.get('/pending-approvals', getPendingApprovals);
-router.put('/hotels/:id/approve', approveHotel);
-router.put('/users/:id/approve', approveUser);
+router.patch('/hotels/:id/approve', approveHotel);
+router.patch('/users/:id/approve', approveUser);
 router.get('/analytics', getPlatformAnalytics);
 router.post('/generate-demo-data', generateDemoData);
 
