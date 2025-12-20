@@ -141,3 +141,154 @@ export const generateDemoData = async (req, res, next) => {
   }
 };
 
+// @desc    Get all users with filters
+// @route   GET /api/admin/users
+// @access  Private (Admin)
+export const getAllUsers = async (req, res, next) => {
+  try {
+    const { role, status, search, page = 1, limit = 20 } = req.query;
+    
+    // Build query
+    const query = {};
+    
+    if (role && role !== 'all') {
+      query.role = role;
+    }
+    
+    if (status === 'pending') {
+      query.isApproved = false;
+    } else if (status === 'approved') {
+      query.isApproved = true;
+    }
+    
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+      ];
+    }
+    
+    // Calculate pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+    
+    // Get users with pagination
+    const users = await User.find(query)
+      .select('-password')
+      .sort('-createdAt')
+      .skip(skip)
+      .limit(limitNum);
+    
+    // Get total count
+    const total = await User.countDocuments(query);
+    
+    res.json({
+      success: true,
+      data: {
+        users,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages: Math.ceil(total / limitNum),
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get user statistics
+// @route   GET /api/admin/users/statistics
+// @access  Private (Admin)
+export const getUserStatistics = async (req, res, next) => {
+  try {
+    const now = new Date();
+    const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    
+    // Total users by role
+    const totalUsers = await User.countDocuments();
+    const customers = await User.countDocuments({ role: 'customer' });
+    const owners = await User.countDocuments({ role: 'hotel_owner' });
+    const admins = await User.countDocuments({ role: 'admin' });
+    
+    // Pending approvals
+    const pendingOwners = await User.countDocuments({
+      role: 'hotel_owner',
+      isApproved: false,
+    });
+    
+    // New registrations
+    const newLast7Days = await User.countDocuments({
+      createdAt: { $gte: last7Days },
+    });
+    const newLast30Days = await User.countDocuments({
+      createdAt: { $gte: last30Days },
+    });
+    
+    // Verified users
+    const verifiedUsers = await User.countDocuments({ isVerified: true });
+    const unverifiedUsers = totalUsers - verifiedUsers;
+    
+    // OAuth users
+    const oauthUsers = await User.countDocuments({
+      oauthProvider: { $ne: null },
+    });
+    const emailUsers = totalUsers - oauthUsers;
+    
+    // Registration trend (last 7 days)
+    const registrationTrend = await User.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: last7Days },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
+          },
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $sort: { _id: 1 },
+      },
+    ]);
+    
+    res.json({
+      success: true,
+      data: {
+        totals: {
+          all: totalUsers,
+          customers,
+          owners,
+          admins,
+        },
+        approvals: {
+          pending: pendingOwners,
+          approved: owners - pendingOwners,
+        },
+        registrations: {
+          last7Days: newLast7Days,
+          last30Days: newLast30Days,
+        },
+        verification: {
+          verified: verifiedUsers,
+          unverified: unverifiedUsers,
+        },
+        authentication: {
+          oauth: oauthUsers,
+          email: emailUsers,
+        },
+        trend: registrationTrend,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

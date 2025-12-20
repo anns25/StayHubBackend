@@ -27,5 +27,24 @@ const upload = multer({
   },
 });
 
+// Add error handling middleware after multer
+export const handleUploadError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        message: 'File size too large. Maximum size is 5MB per file.',
+      });
+    }
+    if (err.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Too many files. Maximum 10 files allowed.',
+      });
+    }
+  }
+  next(err);
+};
+
 export default upload;
 

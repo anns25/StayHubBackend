@@ -5,6 +5,8 @@ import {
   getPendingApprovals,
   getPlatformAnalytics,
   generateDemoData,
+  getAllUsers,
+  getUserStatistics,
 } from '../controllers/adminController.js';
 import { protect, authorize } from '../middleware/auth.js';
 
@@ -17,6 +19,8 @@ router.use(authorize('admin'));
 router.get('/pending-approvals', getPendingApprovals);
 router.patch('/hotels/:id/approve', approveHotel);
 router.patch('/users/:id/approve', approveUser);
+router.get('/users/statistics', getUserStatistics);
+router.get('/users', getAllUsers);
 router.get('/analytics', getPlatformAnalytics);
 router.post('/generate-demo-data', generateDemoData);
 

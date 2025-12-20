@@ -50,11 +50,24 @@ export const createHotel = async (req, res, next) => {
   try {
     req.body.owner = req.user.id;
 
-    // Handle image uploads
+    // Geocode address to get coordinates
+    if (req.body.location && !req.body.location.coordinates) {
+      try {
+        const coordinates = await geocodeAddress(req.body.location);
+        req.body.location.coordinates = coordinates;
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message: error.message || 'Failed to geocode address',
+        });
+      }
+    }
+
+    // Handle image uploads from Cloudinary
     if (req.files && req.files.length > 0) {
       req.body.images = req.files.map(file => ({
-        url: file.path,
-        publicId: file.filename,
+        url: file.path || file.secure_url || file.url, // Cloudinary URL
+        publicId: file.filename || file.public_id, // Cloudinary public_id
       }));
     }
 
@@ -91,12 +104,55 @@ export const updateHotel = async (req, res, next) => {
       });
     }
 
-    // Handle image uploads
+    // Geocode address if location fields changed
+    if (req.body.location && (
+      req.body.location.address !== hotel.location.address ||
+      req.body.location.city !== hotel.location.city ||
+      req.body.location.state !== hotel.location.state ||
+      req.body.location.country !== hotel.location.country ||
+      req.body.location.zipCode !== hotel.location.zipCode
+    )) {
+      try {
+        const coordinates = await geocodeAddress(req.body.location);
+        req.body.location.coordinates = coordinates;
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message: error.message || 'Failed to geocode address',
+        });
+      }
+    } else if (req.body.location) {
+      // Keep existing coordinates if location hasn't changed
+      req.body.location.coordinates = hotel.location.coordinates;
+    }
+
+    // Handle image uploads from Cloudinary
+    // If new images are uploaded, replace existing ones
+    // If no new images, keep existing images
     if (req.files && req.files.length > 0) {
+      // Delete old images from Cloudinary if they exist
+      if (hotel.images && hotel.images.length > 0) {
+        const cloudinary = (await import('../config/cloudinary.js')).default;
+        for (const image of hotel.images) {
+          if (image.publicId) {
+            try {
+              await cloudinary.uploader.destroy(image.publicId);
+            } catch (error) {
+              console.error('Error deleting old image from Cloudinary:', error);
+              // Continue even if deletion fails
+            }
+          }
+        }
+      }
+
+      // Add new images
       req.body.images = req.files.map(file => ({
-        url: file.path,
-        publicId: file.filename,
+        url: file.path || file.secure_url || file.url,
+        publicId: file.filename || file.public_id,
       }));
+    } else {
+      // Keep existing images if no new images uploaded
+      delete req.body.images;
     }
 
     hotel = await Hotel.findByIdAndUpdate(req.params.id, req.body, {
@@ -205,3 +261,20 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// @desc    Get hotels by owner
+// @route   GET /api/hotels/my-hotels
+// @access  Private (Hotel Owner/Admin)
+export const getMyHotels = async (req, res, next) => {
+  try {
+    const hotels = await Hotel.find({ owner: req.user.id })
+      .sort('-createdAt');
+
+    res.json({
+      success: true,
+      count: hotels.length,
+      data: hotels,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
