@@ -8,7 +8,7 @@ import {
   getRoomsByHotel,
 } from '../controllers/roomController.js';
 import { protect, authorize } from '../middleware/auth.js';
-import upload from '../middleware/upload.js';
+import upload, { handleUploadError } from '../middleware/upload.js';
 
 const router = express.Router();
 
