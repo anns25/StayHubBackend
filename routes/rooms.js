@@ -12,11 +12,14 @@ import upload from '../middleware/upload.js';
 
 const router = express.Router();
 
+// Public routes
 router.get('/hotel/:hotelId', getRoomsByHotel);
 router.get('/:id', getRoom);
+
+// Protected routes
 router.get('/', getRooms);
-router.post('/', protect, authorize('hotel_owner', 'admin'), upload.array('images', 5), createRoom);
-router.put('/:id', protect, authorize('hotel_owner', 'admin'), upload.array('images', 5), updateRoom);
+router.post('/', protect, authorize('hotel_owner', 'admin'), upload.array('images', 5), handleUploadError, createRoom);
+router.patch('/:id', protect, authorize('hotel_owner', 'admin'), upload.array('images', 5), handleUploadError, updateRoom);
 router.delete('/:id', protect, authorize('hotel_owner', 'admin'), deleteRoom);
 
 export default router;

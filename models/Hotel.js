@@ -43,11 +43,11 @@ const hotelSchema = new mongoose.Schema({
     coordinates: {
       latitude: {
         type: Number,
-        required: true,
+        //required: true,
       },
       longitude: {
         type: Number,
-        required: true,
+        //required: true,
       },
     },
   },

@@ -9,6 +9,11 @@ const client = new Client({});
  */
 export const geocodeAddress = async (location) => {
   try {
+    // Check if API key exists
+    if (!process.env.GOOGLE_MAPS_API_KEY) {
+      throw new Error('GOOGLE_MAPS_API_KEY is not set in environment variables');
+    }
+
     // Build full address string
     const addressParts = [
       location.address,
@@ -19,6 +24,13 @@ export const geocodeAddress = async (location) => {
     ].filter(Boolean); // Remove empty parts
 
     const fullAddress = addressParts.join(', ');
+
+    if (!fullAddress) {
+      throw new Error('Address information is incomplete');
+    }
+
+    console.log('Geocoding address:', fullAddress);
+    console.log('Using API key:', process.env.GOOGLE_MAPS_API_KEY ? 'Set' : 'Not set');
 
     const response = await client.geocode({
       params: {
@@ -37,9 +49,17 @@ export const geocodeAddress = async (location) => {
       throw new Error('No results found for the provided address');
     }
   } catch (error) {
-    console.error('Geocoding error:', error);
+    console.error('Geocoding error details:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+    });
+    
     if (error.response?.data?.error_message) {
       throw new Error(`Geocoding failed: ${error.response.data.error_message}`);
+    }
+    if (error.message) {
+      throw error;
     }
     throw new Error('Failed to geocode address. Please check the address and try again.');
   }
