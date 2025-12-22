@@ -43,6 +43,7 @@ export const register = async (req, res, next) => {
         role: user.role,
         isApproved: user.isApproved,
         isVerified: user.isVerified,
+        profileImage: user.profileImage,
       },
     };
 
@@ -109,6 +110,7 @@ export const login = async (req, res, next) => {
           role: user.role,
           isApproved: user.isApproved,
           isVerified: user.isVerified,
+          profileImage: user.profileImage,
         },
         requiresApproval: true,
         message: 'Your account is pending admin approval.',
@@ -125,6 +127,7 @@ export const login = async (req, res, next) => {
         role: user.role,
         isApproved: user.isApproved,
         isVerified: user.isVerified,
+        profileImage: user.profileImage,
       },
     });
   } catch (error) {
@@ -183,19 +186,55 @@ export const getMe = async (req, res, next) => {
 };
 
 // @desc    Update user profile
-// @route   PUT /api/auth/profile
+// @route   PATCH /api/auth/profile
 // @access  Private
 export const updateProfile = async (req, res, next) => {
   try {
+    const updateData = { ...req.body };
+
+    // If profile image is uploaded, use the Cloudinary URL
+    if (req.file) {
+      updateData.profileImage = req.file.path;
+    }
+
+    // Parse nested address fields if they exist
+    if (req.body.address) {
+      try {
+        updateData.address = typeof req.body.address === 'string' 
+          ? JSON.parse(req.body.address) 
+          : req.body.address;
+      } catch (e) {
+        // If parsing fails, keep as is
+      }
+    }
+
     const user = await User.findByIdAndUpdate(
       req.user.id,
-      req.body,
+      updateData,
       { new: true, runValidators: true }
-    );
+    ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
 
     res.json({
       success: true,
-      user,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isApproved: user.isApproved,
+        isVerified: user.isVerified,
+        profileImage: user.profileImage,
+        phone: user.phone,
+        address: user.address,
+        createdAt: user.createdAt,
+      },
     });
   } catch (error) {
     next(error);

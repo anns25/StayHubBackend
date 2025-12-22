@@ -13,10 +13,40 @@ const storage = new CloudinaryStorage({
   },
 });
 
+// Profile image storage with circular/square transformation
+const profileImageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req, file) => {
+    return {
+      folder: 'ai-stay-hub/profile-images',
+      allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+      transformation: [
+        { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+        { radius: 'max' }, // Make it circular
+      ],
+    };
+  },
+});
+
 const upload = multer({
   storage: storage,
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  },
+});
+
+// Profile image upload (single file, 2MB limit)
+export const uploadProfileImage = multer({
+  storage: profileImageStorage,
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB for profile images
   },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {

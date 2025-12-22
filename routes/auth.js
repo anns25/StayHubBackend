@@ -6,6 +6,7 @@ import { validateRegister, validateLogin } from '../validators/authValidator.js'
 import { oauthCallback } from '../controllers/oauthController.js';
 import { forgotPassword, resetPassword } from '../controllers/passwordController.js';
 import User from '../models/User.js';
+import upload, { handleUploadError, uploadProfileImage } from '../middleware/upload.js';
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ router.patch('/resetpassword/:resettoken', authLimiter, resetPassword);
 router.post('/oauth/callback', authLimiter, oauthCallback);
 router.post('/logout', protect, logout);
 router.get('/me', protect, getMe);
-router.put('/profile', protect, updateProfile);
+router.patch('/profile', protect, uploadProfileImage.single('profileImage'), handleUploadError, updateProfile);
 
 // Check if user exists (for OAuth flow)
 router.get('/check-user', async (req, res) => {
