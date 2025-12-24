@@ -6,7 +6,7 @@ import Room from '../models/Room.js';
 // Helper function to parse nested FormData fields
 const parseNestedFormData = (body) => {
   const parsed = { ...body };
-  
+
   // Parse location fields if they exist as flat keys
   if (body['location[address]'] || body['location[city]']) {
     parsed.location = {
@@ -21,7 +21,7 @@ const parseNestedFormData = (body) => {
       delete parsed[key];
     });
   }
-  
+
   // Parse amenities array
   const amenities = [];
   let index = 0;
@@ -33,7 +33,7 @@ const parseNestedFormData = (body) => {
   if (amenities.length > 0) {
     parsed.amenities = amenities;
   }
-  
+
   // Parse policies
   if (body['policies[checkIn]'] || body['policies[checkOut]']) {
     parsed.policies = {
@@ -48,7 +48,7 @@ const parseNestedFormData = (body) => {
       delete parsed[key];
     });
   }
-  
+
   // Parse contact
   if (body['contact[phone]'] || body['contact[email]']) {
     parsed.contact = {
@@ -60,7 +60,7 @@ const parseNestedFormData = (body) => {
       delete parsed[key];
     });
   }
-  
+
   return parsed;
 };
 
@@ -113,7 +113,7 @@ export const createHotel = async (req, res, next) => {
   try {
     // Parse FormData nested fields into proper objects
     req.body = parseNestedFormData(req.body);
-    
+
     req.body.owner = req.user.id;
 
     // Log location data for debugging
@@ -159,7 +159,7 @@ export const updateHotel = async (req, res, next) => {
   try {
     // Parse FormData nested fields into proper objects
     req.body = parseNestedFormData(req.body);
-    
+
     let hotel = await Hotel.findById(req.params.id);
 
     if (!hotel) {
@@ -169,8 +169,19 @@ export const updateHotel = async (req, res, next) => {
       });
     }
 
-    // Check ownership
-    if (hotel.owner.toString() !== req.user.id && req.user.role !== 'admin') {
+    // Check ownership - ensure owner exists before calling toString()
+    if (!hotel.owner) {
+      return res.status(400).json({
+        success: false,
+        message: 'Hotel owner information is missing',
+      });
+    }
+
+    // Convert owner to string for comparison (handles both ObjectId and string)
+    const hotelOwnerId = hotel.owner.toString ? hotel.owner.toString() : String(hotel.owner);
+    const userId = req.user.id.toString ? req.user.id.toString() : String(req.user.id);
+
+    if (hotelOwnerId !== userId && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this hotel',
