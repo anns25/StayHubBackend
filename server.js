@@ -15,6 +15,7 @@ import chatRoutes from './routes/chat.js';
 import reviewRoutes from './routes/reviews.js';
 import aiRoutes from './routes/ai.js';
 import adminRoutes from './routes/admin.js';
+import customerRoutes from './routes/customers.js';
 
 // Socket
 import { setupChatSocket } from './socket/chatSocket.js';
@@ -50,6 +51,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/customers', customerRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

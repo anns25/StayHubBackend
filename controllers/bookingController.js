@@ -1,26 +1,58 @@
 import Booking from '../models/Booking.js';
 import Room from '../models/Room.js';
+import Hotel from '../models/Hotel.js';
 
 // @desc    Get all bookings
 // @route   GET /api/bookings
 // @access  Private
 export const getBookings = async (req, res, next) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Not authenticated',
+      });
+    }
+
     let query = {};
 
-    // Hotel owners see their hotel bookings, customers see their own
     if (req.user.role === 'hotel_owner') {
-      const { Hotel } = await import('../models/Hotel.js');
-      const hotels = await Hotel.find({ owner: req.user.id });
-      query.hotel = { $in: hotels.map(h => h._id) };
-    } else if (req.user.role === 'customer') {
+      const hotels = await Hotel.find({ owner: req.user.id }).select('_id');
+      const hotelIds = hotels.map(h => h._id);
+
+      if (hotelIds.length === 0) {
+        return res.json({
+          success: true,
+          count: 0,
+          data: [],
+        });
+      }
+
+      if (req.query.hotel && req.query.hotel !== 'all') {
+        if (!hotelIds.some(id => id.equals(req.query.hotel))) {
+          return res.status(403).json({
+            success: false,
+            message: 'You do not have access to this hotel',
+          });
+        }
+        query.hotel = req.query.hotel;
+      } else {
+        query.hotel = { $in: hotelIds };
+      }
+    }
+
+    if (req.user.role === 'customer') {
       query.customer = req.user.id;
+    }
+
+    if (req.query.status && req.query.status !== 'all') {
+      query.status = req.query.status;
     }
 
     const bookings = await Booking.find(query)
       .populate('customer', 'name email')
-      .populate('hotel', 'name location')
-      .populate('room', 'name type price')
+      .populate('hotel', 'name location images')
+      .populate('room', 'name type price images')
       .sort('-createdAt');
 
     res.json({
@@ -29,9 +61,11 @@ export const getBookings = async (req, res, next) => {
       data: bookings,
     });
   } catch (error) {
+    console.error('Get bookings error:', error);
     next(error);
   }
 };
+
 
 // @desc    Get single booking
 // @route   GET /api/bookings/:id
@@ -40,8 +74,8 @@ export const getBooking = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id)
       .populate('customer', 'name email')
-      .populate('hotel', 'name location')
-      .populate('room', 'name type price');
+      .populate('hotel', 'name location images phone email')
+      .populate('room', 'name type price capacity images description');
 
     if (!booking) {
       return res.status(404).json({
@@ -66,7 +100,7 @@ export const getMyBookings = async (req, res, next) => {
   try {
     const bookings = await Booking.find({ customer: req.user.id })
       .populate('hotel', 'name location images')
-      .populate('room', 'name type')
+      .populate('room', 'name type images')
       .sort('-createdAt');
 
     res.json({
@@ -153,7 +187,8 @@ export const createBooking = async (req, res, next) => {
 // @access  Private
 export const updateBooking = async (req, res, next) => {
   try {
-    let booking = await Booking.findById(req.params.id);
+    const booking = await Booking.findById(req.params.id)
+      .populate('hotel', 'owner');
 
     if (!booking) {
       return res.status(404).json({
@@ -162,33 +197,81 @@ export const updateBooking = async (req, res, next) => {
       });
     }
 
-    booking = await Booking.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    })
-      .populate('hotel', 'name')
-      .populate('room', 'name type');
+    // Check authorization
+    const isHotelOwner = req.user.role === 'hotel_owner' &&
+      booking.hotel &&
+      booking.hotel.owner.toString() === req.user.id.toString();
+    const isAdmin = req.user.role === 'admin';
+    const isCustomer = req.user.role === 'customer' &&
+      booking.customer.toString() === req.user.id.toString();
+
+    // Only hotel owners and admins can update booking status
+    // Customers can only update their own bookings for non-status fields
+    if (req.body.status) {
+      if (!isHotelOwner && !isAdmin) {
+        return res.status(403).json({
+          success: false,
+          message: 'Only hotel owners and admins can change booking status',
+        });
+      }
+    } else {
+      // For non-status updates, allow customer to update their own booking
+      if (!isHotelOwner && !isAdmin && !isCustomer) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to update this booking',
+        });
+      }
+    }
+
+    const updatedBooking = await Booking.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .populate('hotel', 'name location images')
+      .populate('room', 'name type price images')
+      .populate('customer', 'name email');
 
     res.json({
       success: true,
-      data: booking,
+      data: updatedBooking,
     });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Cancel booking
+/// @desc    Cancel booking
 // @route   PUT /api/bookings/:id/cancel
 // @access  Private
 export const cancelBooking = async (req, res, next) => {
   try {
-    const booking = await Booking.findById(req.params.id);
+    const booking = await Booking.findById(req.params.id)
+      .populate('hotel', 'owner');
 
     if (!booking) {
       return res.status(404).json({
         success: false,
         message: 'Booking not found',
+      });
+    }
+
+    // Check authorization: customers can cancel their own, hotel owners can cancel their hotel's bookings, admins can cancel any
+    const isHotelOwner = req.user.role === 'hotel_owner' &&
+      booking.hotel &&
+      booking.hotel.owner.toString() === req.user.id.toString();
+    const isAdmin = req.user.role === 'admin';
+    const isCustomer = req.user.role === 'customer' &&
+      booking.customer.toString() === req.user.id.toString();
+
+    if (!isHotelOwner && !isAdmin && !isCustomer) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to cancel this booking',
       });
     }
 

@@ -64,6 +64,10 @@ const userSchema = new mongoose.Schema({
     zipCode: String,
     country: String,
   },
+  favorites: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Hotel',
+  }],
   resetPasswordToken: {
     type: String,
     default: null,

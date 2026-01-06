@@ -200,8 +200,8 @@ export const updateProfile = async (req, res, next) => {
     // Parse nested address fields if they exist
     if (req.body.address) {
       try {
-        updateData.address = typeof req.body.address === 'string' 
-          ? JSON.parse(req.body.address) 
+        updateData.address = typeof req.body.address === 'string'
+          ? JSON.parse(req.body.address)
           : req.body.address;
       } catch (e) {
         // If parsing fails, keep as is
@@ -235,6 +235,148 @@ export const updateProfile = async (req, res, next) => {
         address: user.address,
         createdAt: user.createdAt,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get user's favorite hotels
+// @route   GET /api/customers/favorites
+// @access  Private (Customer only)
+export const getFavoriteHotels = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id).populate({
+      path: 'favorites',
+      select: 'name location images category rating',
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      hotels: user.favorites || [],
+      count: user.favorites?.length || 0,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Add hotel to favorites
+// @route   POST /api/customers/favorites/:hotelId
+// @access  Private (Customer only)
+export const addToFavorites = async (req, res, next) => {
+  try {
+    const { hotelId } = req.params;
+
+    // Validate hotelId
+    if (!mongoose.Types.ObjectId.isValid(hotelId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid hotel ID',
+      });
+    }
+
+    // Check if hotel exists
+    const Hotel = (await import('../models/Hotel.js')).default;
+    const hotel = await Hotel.findById(hotelId);
+
+    if (!hotel) {
+      return res.status(404).json({
+        success: false,
+        message: 'Hotel not found',
+      });
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    // Check if already in favorites
+    if (user.favorites && user.favorites.includes(hotelId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Hotel already in favorites',
+      });
+    }
+
+    // Add to favorites
+    if (!user.favorites) {
+      user.favorites = [];
+    }
+    user.favorites.push(hotelId);
+    await user.save();
+
+    // Populate and return
+    await user.populate({
+      path: 'favorites',
+      select: 'name location images category rating',
+    });
+
+    res.json({
+      success: true,
+      message: 'Hotel added to favorites',
+      hotel: hotel,
+      favorites: user.favorites,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Remove hotel from favorites
+// @route   DELETE /api/customers/favorites/:hotelId
+// @access  Private (Customer only)
+export const removeFromFavorites = async (req, res, next) => {
+  try {
+    const { hotelId } = req.params;
+
+    // Validate hotelId
+    if (!mongoose.Types.ObjectId.isValid(hotelId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid hotel ID',
+      });
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    // Check if in favorites
+    if (!user.favorites || !user.favorites.includes(hotelId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Hotel not in favorites',
+      });
+    }
+
+    // Remove from favorites
+    user.favorites = user.favorites.filter(
+      (id) => id.toString() !== hotelId
+    );
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Hotel removed from favorites',
+      favorites: user.favorites,
     });
   } catch (error) {
     next(error);
