@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
+    "seed": "node scripts/seed.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@faker-js/faker": "^10.2.0",
     "@google/generative-ai": "^0.2.1",
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "axios": "^1.6.2",
