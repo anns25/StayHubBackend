@@ -65,6 +65,12 @@ const bookingSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  paymentIntentId: {
+    type: String,
+  },
+  refundId: {
+    type: String,
+  },
   aiSummary: {
     type: String,
     default: null,

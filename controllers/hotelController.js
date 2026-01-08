@@ -69,7 +69,36 @@ const parseNestedFormData = (body) => {
 // @access  Public
 export const getHotels = async (req, res, next) => {
   try {
-    const hotels = await Hotel.find({ isApproved: true, isActive: true })
+    const { category, city, minPrice, maxPrice, search } = req.query;
+
+    let query = { isApproved: true, isActive: true };
+
+    // Filter by category
+    if (category) {
+      query.category = category;
+    }
+
+    // Filter by city
+    if (city) {
+      query['location.city'] = new RegExp(city, 'i');
+    }
+
+    // Filter by price range (if you have room prices, you'd need to join with rooms)
+    // For now, this is a placeholder - you might need to adjust based on your schema
+    if (minPrice || maxPrice) {
+      // This would require aggregation if filtering by room prices
+      // For now, we'll skip price filtering at hotel level
+    }
+
+    // Search by name or description
+    if (search) {
+      query.$or = [
+        { name: new RegExp(search, 'i') },
+        { description: new RegExp(search, 'i') }
+      ];
+    }
+
+    const hotels = await Hotel.find(query)
       .populate('owner', 'name email')
       .sort('-createdAt');
 

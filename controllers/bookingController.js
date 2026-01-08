@@ -1,6 +1,9 @@
 import Booking from '../models/Booking.js';
 import Room from '../models/Room.js';
 import Hotel from '../models/Hotel.js';
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // @desc    Get all bookings
 // @route   GET /api/bookings
@@ -224,6 +227,48 @@ export const updateBooking = async (req, res, next) => {
       }
     }
 
+    // Validation: Prevent confirming bookings with pending payment
+    const newStatus = req.body.status !== undefined ? req.body.status : booking.status;
+    const newPaymentStatus = req.body.paymentStatus !== undefined ? req.body.paymentStatus : booking.paymentStatus;
+
+    // Invalid combinations
+    const invalidCombinations = [
+      // Cannot refund if payment was never made
+      { status: 'pending', paymentStatus: 'refunded', message: 'Cannot refund a booking that has not been paid.' },
+
+      // Cannot confirm/check-in/check-out without payment
+      { status: 'confirmed', paymentStatus: 'pending', message: 'Cannot confirm booking with pending payment. Payment must be completed first.' },
+      { status: 'confirmed', paymentStatus: 'failed', message: 'Cannot confirm booking with failed payment. Payment must be successful first.' },
+      { status: 'checked_in', paymentStatus: 'pending', message: 'Cannot check in guest with pending payment. Payment must be completed first.' },
+      { status: 'checked_in', paymentStatus: 'failed', message: 'Cannot check in guest with failed payment. Payment must be successful first.' },
+      { status: 'checked_out', paymentStatus: 'pending', message: 'Cannot check out guest with pending payment. Payment must be completed first.' },
+      { status: 'checked_out', paymentStatus: 'failed', message: 'Cannot check out guest with failed payment. Payment must be successful first.' },
+    ];
+
+    // Check for invalid combinations
+    const invalidCombo = invalidCombinations.find(
+      combo => combo.status === newStatus && combo.paymentStatus === newPaymentStatus
+    );
+
+    if (invalidCombo) {
+      return res.status(400).json({
+        success: false,
+        message: invalidCombo.message,
+      });
+    }
+
+    // Warning: Cancelled booking with paid status should be refunded
+    if (newStatus === 'cancelled' && newPaymentStatus === 'paid' && booking.paymentStatus === 'paid') {
+      // This is a warning, not an error - allow it but log it
+      console.warn(`Warning: Booking ${booking._id} is being cancelled but payment status is still 'paid'. Consider processing a refund.`);
+    }
+
+    // Warning: Checked in but refunded (unusual but might be valid in some cases)
+    if (newStatus === 'checked_in' && newPaymentStatus === 'refunded') {
+      console.warn(`Warning: Booking ${booking._id} is checked in but payment status is 'refunded'. This is unusual and may require review.`);
+    }
+
+
     const updatedBooking = await Booking.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -251,7 +296,8 @@ export const updateBooking = async (req, res, next) => {
 export const cancelBooking = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id)
-      .populate('hotel', 'owner');
+      .populate('hotel', 'owner')
+      .populate('customer', 'name email');
 
     if (!booking) {
       return res.status(404).json({
@@ -275,6 +321,41 @@ export const cancelBooking = async (req, res, next) => {
       });
     }
 
+    // Process refund if payment was made and hotel owner/admin is canceling
+    if ((isHotelOwner || isAdmin) && booking.paymentStatus === 'paid' && booking.paymentMethod === 'card') {
+      try {
+        // Find the payment intent from Stripe
+        // Note: You'll need to store paymentIntentId in booking model for this to work
+        // For now, we'll search by metadata
+        const paymentIntents = await stripe.paymentIntents.list({
+          limit: 100,
+        });
+
+        const paymentIntent = paymentIntents.data.find(
+          (pi) => pi.metadata.roomId === booking.room.toString() &&
+            pi.metadata.userId === booking.customer.toString() &&
+            pi.status === 'succeeded'
+        );
+
+        if (paymentIntent) {
+          // Create refund
+          const refund = await stripe.refunds.create({
+            payment_intent: paymentIntent.id,
+            amount: Math.round(booking.totalAmount * 100), // Convert to cents
+            reason: 'requested_by_accommodation_provider',
+          });
+
+          booking.paymentStatus = 'refunded';
+          booking.refundId = refund.id; // Add refundId field to Booking model
+        }
+      } catch (refundError) {
+        console.error('Refund error:', refundError);
+        // Continue with cancellation even if refund fails
+        // You might want to log this for manual processing
+      }
+    }
+
+
     booking.status = 'cancelled';
     booking.cancellationReason = req.body.reason;
     await booking.save();
@@ -289,6 +370,7 @@ export const cancelBooking = async (req, res, next) => {
     res.json({
       success: true,
       data: booking,
+      refunded: booking.paymentStatus === 'refunded',
     });
   } catch (error) {
     next(error);
