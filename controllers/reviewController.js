@@ -49,6 +49,49 @@ export const getReview = async (req, res, next) => {
   }
 };
 
+// @desc    Check if booking can be reviewed
+// @route   GET /api/reviews/booking/:bookingId/eligible
+// @access  Private
+export const checkReviewEligibility = async (req, res, next) => {
+  try {
+    const booking = await Booking.findById(req.params.bookingId);
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found',
+      });
+    }
+
+    // Check if booking belongs to user
+    if (booking.customer.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized',
+      });
+    }
+
+    // Check if booking is checked out
+    const isCheckedOut = booking.status === 'checked_out';
+
+    // Check if review already exists
+    const existingReview = await Review.findOne({ booking: booking._id });
+    const hasReview = !!existingReview;
+
+    res.json({
+      success: true,
+      data: {
+        eligible: isCheckedOut && !hasReview,
+        isCheckedOut,
+        hasReview,
+        reviewId: existingReview?._id || null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Create review
 // @route   POST /api/reviews
 // @access  Private
@@ -63,6 +106,14 @@ export const createReview = async (req, res, next) => {
         success: false,
         message: 'Not authorized to review this booking',
       });
+    }
+
+    // Check if booking is checked out
+    if (bookingData.status !== 'checked_out') {
+      return res.status(400).json({
+        success: false,
+        message: 'You can only review bookings that have been checked out'
+      })
     }
 
     // Check if review already exists
