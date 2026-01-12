@@ -87,33 +87,183 @@ export const approveUser = async (req, res, next) => {
 // @access  Private (Admin)
 export const getPlatformAnalytics = async (req, res, next) => {
   try {
+    const now = new Date();
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    
+    // Previous period for comparison (30 days ago)
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
+
+    // Current month date range
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const previousMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
+    // Helper function to validate and round trend values
+    const validateTrend = (value) => {
+      if (isNaN(value) || !isFinite(value)) {
+        return 0;
+      }
+      return Math.round(value * 10) / 10;
+    };
+
+    // ========== HOTELS STATISTICS ==========
     const totalHotels = await Hotel.countDocuments();
     const approvedHotels = await Hotel.countDocuments({ isApproved: true });
+    const pendingHotels = totalHotels - approvedHotels;
+
+    // Hotels created in last 30 days (for trend)
+    const hotelsLast30Days = await Hotel.countDocuments({
+      createdAt: { $gte: thirtyDaysAgo },
+    });
+    
+    const sixtyDaysAgo = new Date(thirtyDaysAgo.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const hotelsPrevious30Days = await Hotel.countDocuments({
+      createdAt: { 
+        $gte: sixtyDaysAgo,
+        $lt: thirtyDaysAgo,
+      },
+    });
+
+    // Calculate hotels trend
+    let hotelsTrend = 0;
+    if (hotelsPrevious30Days === 0) {
+      hotelsTrend = hotelsLast30Days > 0 ? 100 : 0;
+    } else {
+      hotelsTrend = ((hotelsLast30Days - hotelsPrevious30Days) / hotelsPrevious30Days) * 100;
+    }
+    hotelsTrend = validateTrend(hotelsTrend);
+
+    // Pending hotels (new ones created today)
+    const newPendingToday = await Hotel.countDocuments({
+      isApproved: false,
+      createdAt: { $gte: today },
+    });
+
+    // ========== USERS STATISTICS ==========
     const totalUsers = await User.countDocuments();
-    const totalBookings = await Booking.countDocuments();
-    const totalRevenue = await Booking.aggregate([
-      { $match: { paymentStatus: 'paid' } },
+    
+    // Active users: users who have logged in within last 30 days
+    // Note: This assumes User model has a lastLogin field. If not, use a different approach.
+    const activeUsers = await User.countDocuments({
+      lastLogin: { $gte: thirtyDaysAgo },
+    });
+
+    // Users created in last 30 days (for trend)
+    const usersLast30Days = await User.countDocuments({
+      createdAt: { $gte: thirtyDaysAgo },
+    });
+    
+    const usersPrevious30Days = await User.countDocuments({
+      createdAt: { 
+        $gte: sixtyDaysAgo,
+        $lt: thirtyDaysAgo,
+      },
+    });
+
+    // Calculate users trend
+    let usersTrend = 0;
+    if (usersPrevious30Days === 0) {
+      usersTrend = usersLast30Days > 0 ? 100 : 0;
+    } else {
+      usersTrend = ((usersLast30Days - usersPrevious30Days) / usersPrevious30Days) * 100;
+    }
+    usersTrend = validateTrend(usersTrend);
+
+    // Get user counts by role (run in parallel for better performance)
+    const [customers, owners, admins] = await Promise.all([
+      User.countDocuments({ role: 'customer' }),
+      User.countDocuments({ role: 'hotel_owner' }),
+      User.countDocuments({ role: 'admin' }),
+    ]);
+
+    // ========== REVENUE STATISTICS ==========
+    // Current month revenue
+    const currentMonthRevenue = await Booking.aggregate([
+      { 
+        $match: { 
+          paymentStatus: 'paid',
+          status: { $ne: 'cancelled' },
+          createdAt: { $gte: currentMonthStart, $lte: now },
+        },
+      },
       { $group: { _id: null, total: { $sum: '$totalAmount' } } },
     ]);
 
+    // Previous month revenue
+    const previousMonthRevenue = await Booking.aggregate([
+      { 
+        $match: { 
+          paymentStatus: 'paid',
+          status: { $ne: 'cancelled' },
+          createdAt: { $gte: previousMonthStart, $lte: previousMonthEnd },
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } },
+    ]);
+
+    const revenue = currentMonthRevenue[0]?.total || 0;
+    const previousRevenue = previousMonthRevenue[0]?.total || 0;
+
+    // Calculate revenue trend
+    let revenueTrend = 0;
+    if (previousRevenue === 0) {
+      revenueTrend = revenue > 0 ? 100 : 0;
+    } else {
+      revenueTrend = ((revenue - previousRevenue) / previousRevenue) * 100;
+    }
+    revenueTrend = validateTrend(revenueTrend);
+
+    // Total revenue (all time)
+    const totalRevenueAllTime = await Booking.aggregate([
+      { 
+        $match: { 
+          paymentStatus: 'paid',
+          status: { $ne: 'cancelled' },
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } },
+    ]);
+
+    // ========== BOOKINGS STATISTICS ==========
+    const [totalBookings, confirmedBookings, completedBookings, cancelledBookings] = await Promise.all([
+      Booking.countDocuments(),
+      Booking.countDocuments({ status: 'confirmed' }),
+      Booking.countDocuments({ status: 'checked_out' }),
+      Booking.countDocuments({ status: 'cancelled' }),
+    ]);
+
+    // ========== BUILD RESPONSE ==========
     const stats = {
       hotels: {
-        total: totalHotels,
-        approved: approvedHotels,
-        pending: totalHotels - approvedHotels,
+        total: totalHotels || 0,
+        approved: approvedHotels || 0,
+        pending: pendingHotels || 0,
+        newPendingToday: newPendingToday || 0,
+        trend: hotelsTrend,
       },
       users: {
-        total: totalUsers,
-        customers: await User.countDocuments({ role: 'customer' }),
-        owners: await User.countDocuments({ role: 'hotel_owner' }),
-        admins: await User.countDocuments({ role: 'admin' }),
+        total: totalUsers || 0,
+        active: activeUsers || 0,
+        customers: customers || 0,
+        owners: owners || 0,
+        admins: admins || 0,
+        trend: usersTrend,
       },
       bookings: {
-        total: totalBookings,
-        confirmed: await Booking.countDocuments({ status: 'confirmed' }),
-        completed: await Booking.countDocuments({ status: 'checked_out' }),
+        total: totalBookings || 0,
+        confirmed: confirmedBookings || 0,
+        completed: completedBookings || 0,
+        cancelled: cancelledBookings || 0,
       },
-      revenue: totalRevenue[0]?.total || 0,
+      revenue: {
+        currentMonth: revenue || 0,
+        previousMonth: previousRevenue || 0,
+        allTime: totalRevenueAllTime[0]?.total || 0,
+        trend: revenueTrend,
+      },
     };
 
     res.json({
@@ -121,6 +271,7 @@ export const getPlatformAnalytics = async (req, res, next) => {
       data: stats,
     });
   } catch (error) {
+    console.error('Get platform analytics error:', error);
     next(error);
   }
 };
@@ -291,4 +442,6 @@ export const getUserStatistics = async (req, res, next) => {
     next(error);
   }
 };
+
+
 

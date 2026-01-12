@@ -7,6 +7,7 @@ import {
   deleteHotel,
   searchHotels,
   getMyHotels,
+  getHotelOwnerDashboardStats,
 } from '../controllers/hotelController.js';
 import { protect, authorize } from '../middleware/auth.js';
 import upload, { handleUploadError } from '../middleware/upload.js';
@@ -15,6 +16,7 @@ const router = express.Router();
 
 router.get('/search', searchHotels);
 router.get('/my-hotels', protect, authorize('hotel_owner', 'admin'), getMyHotels);
+router.get('/dashboard/stats', protect, authorize('hotel_owner', 'admin'), getHotelOwnerDashboardStats);
 router.get('/', getHotels);
 router.get('/:id', getHotel);
 router.post('/', protect, authorize('hotel_owner', 'admin'), upload.array('images', 10), handleUploadError, createHotel);
