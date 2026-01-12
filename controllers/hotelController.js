@@ -392,3 +392,174 @@ export const getMyHotels = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Get hotel owner dashboard statistics
+// @route   GET /api/hotels/dashboard/stats
+// @access  Private (Hotel Owner/Admin)
+export const getHotelOwnerDashboardStats = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    // Get all hotels owned by the user
+    const hotels = await Hotel.find({ owner: userId }).select('_id');
+    const hotelIds = hotels.map(h => h._id.toString());
+
+    if (hotelIds.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          bookingsToday: 0,
+          bookingsTodayChange: 0,
+          occupancyRate: 0,
+          occupancyRateChange: 0,
+          monthlyRevenue: 0,
+          monthlyRevenueChange: 0,
+          hotels: [],
+        },
+      });
+    }
+
+    // Get today's date range
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Get yesterday's date range for comparison
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    // Get current month date range
+    const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const currentMonthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    // Get previous month date range
+    const previousMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const previousMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59, 999);
+
+    // Import Booking model
+    const Booking = (await import('../models/Booking.js')).default;
+    const Room = (await import('../models/Room.js')).default;
+
+    // Bookings created today
+    const bookingsToday = await Booking.countDocuments({
+      hotel: { $in: hotelIds },
+      createdAt: { $gte: today, $lt: tomorrow },
+      status: { $ne: 'cancelled' },
+    });
+
+    // Bookings created yesterday (for comparison)
+    const bookingsYesterday = await Booking.countDocuments({
+      hotel: { $in: hotelIds },
+      createdAt: { $gte: yesterday, $lt: today },
+      status: { $ne: 'cancelled' },
+    });
+
+    // Calculate bookings today change percentage
+    const bookingsTodayChange = bookingsYesterday === 0
+      ? (bookingsToday > 0 ? 100 : 0)
+      : ((bookingsToday - bookingsYesterday) / bookingsYesterday) * 100;
+
+    // Get all rooms for occupancy calculation
+    const rooms = await Room.find({ hotel: { $in: hotelIds }, isActive: true });
+    const totalRooms = rooms.reduce((sum, room) => sum + room.quantity, 0);
+
+    // Get active bookings (confirmed, checked_in, or checked_out with paid status)
+    const activeBookings = await Booking.find({
+      hotel: { $in: hotelIds },
+      status: { $in: ['confirmed', 'checked_in', 'checked_out'] },
+      paymentStatus: 'paid',
+      checkIn: { $lte: new Date() },
+      checkOut: { $gte: new Date() },
+    });
+
+    // Calculate occupied rooms
+    const occupiedRooms = activeBookings.length;
+
+    // Current occupancy rate
+    const occupancyRate = totalRooms === 0 ? 0 : (occupiedRooms / totalRooms) * 100;
+
+    // Previous period occupancy (30 days ago)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const previousActiveBookings = await Booking.find({
+      hotel: { $in: hotelIds },
+      status: { $in: ['confirmed', 'checked_in', 'checked_out'] },
+      paymentStatus: 'paid',
+      checkIn: { $lte: thirtyDaysAgo },
+      checkOut: { $gte: thirtyDaysAgo },
+    });
+    const previousOccupiedRooms = previousActiveBookings.length;
+    const previousOccupancyRate = totalRooms === 0 ? 0 : (previousOccupiedRooms / totalRooms) * 100;
+    const occupancyRateChange = previousOccupancyRate === 0
+      ? (occupancyRate > 0 ? 100 : 0)
+      : ((occupancyRate - previousOccupancyRate) / previousOccupancyRate) * 100;
+
+    // Monthly revenue (current month, paid bookings)
+    const monthlyBookings = await Booking.find({
+      hotel: { $in: hotelIds },
+      createdAt: { $gte: currentMonthStart, $lte: currentMonthEnd },
+      paymentStatus: 'paid',
+      status: { $ne: 'cancelled' },
+    });
+    const monthlyRevenue = monthlyBookings.reduce((sum, booking) => sum + booking.totalAmount, 0);
+
+    // Previous month revenue
+    const previousMonthBookings = await Booking.find({
+      hotel: { $in: hotelIds },
+      createdAt: { $gte: previousMonthStart, $lte: previousMonthEnd },
+      paymentStatus: 'paid',
+      status: { $ne: 'cancelled' },
+    });
+    const previousMonthlyRevenue = previousMonthBookings.reduce((sum, booking) => sum + booking.totalAmount, 0);
+    const monthlyRevenueChange = previousMonthlyRevenue === 0
+      ? (monthlyRevenue > 0 ? 100 : 0)
+      : ((monthlyRevenue - previousMonthlyRevenue) / previousMonthlyRevenue) * 100;
+
+    // Get hotel details with room counts and revenue
+    const hotelsWithStats = await Promise.all(
+      hotels.map(async (hotel) => {
+        const hotelId = hotel._id.toString();
+
+        // Room count for this hotel
+        const hotelRooms = await Room.countDocuments({ hotel: hotelId, isActive: true });
+        const totalHotelRooms = await Room.aggregate([
+          { $match: { hotel: hotel._id, isActive: true } },
+          { $group: { _id: null, total: { $sum: '$quantity' } } },
+        ]);
+        const roomCount = totalHotelRooms.length > 0 ? totalHotelRooms[0].total : 0;
+
+        // Revenue for this hotel (current month)
+        const hotelBookings = await Booking.find({
+          hotel: hotelId,
+          createdAt: { $gte: currentMonthStart, $lte: currentMonthEnd },
+          paymentStatus: 'paid',
+          status: { $ne: 'cancelled' },
+        });
+        const hotelRevenue = hotelBookings.reduce((sum, booking) => sum + booking.totalAmount, 0);
+
+        return {
+          id: hotelId,
+          roomCount,
+          revenue: hotelRevenue,
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: {
+        bookingsToday,
+        bookingsTodayChange: Math.round(bookingsTodayChange * 10) / 10,
+        occupancyRate: Math.round(occupancyRate * 10) / 10,
+        occupancyRateChange: Math.round(occupancyRateChange * 10) / 10,
+        monthlyRevenue,
+        monthlyRevenueChange: Math.round(monthlyRevenueChange * 10) / 10,
+        hotels: hotelsWithStats,
+      },
+    });
+  } catch (error) {
+    console.error('Get hotel owner dashboard stats error:', error);
+    next(error);
+  }
+};
